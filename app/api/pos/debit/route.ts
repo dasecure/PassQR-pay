@@ -109,7 +109,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Perform atomic debit using database function
-    const { data: result, error: debitError } = await supabase
+    const { data, error: debitError } = await supabase
       .rpc("debit_pass", {
         p_pass_id: passId,
         p_amount_cents: amountCents,
@@ -125,6 +125,8 @@ export async function POST(req: NextRequest) {
         { status: 500 }
       );
     }
+
+    const result = data as { success: boolean; new_balance: number; error: string | null };
 
     if (!result.success) {
       return NextResponse.json(

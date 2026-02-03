@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase";
+import { getStripe } from "@/lib/stripe";
 import Stripe from "stripe";
 
 export const dynamic = "force-dynamic";
-
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: "2024-12-18.acacia",
-});
-
-const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
 export async function POST(req: NextRequest) {
   const body = await req.text();
@@ -19,9 +14,10 @@ export async function POST(req: NextRequest) {
   }
 
   let event: Stripe.Event;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
   try {
-    event = stripe.webhooks.constructEvent(body, signature, webhookSecret);
+    event = getStripe().webhooks.constructEvent(body, signature, webhookSecret);
   } catch (err: any) {
     console.error("Webhook signature verification failed:", err.message);
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
@@ -47,7 +43,7 @@ export async function POST(req: NextRequest) {
     const supabase = createAdminClient();
 
     // Top up the pass using database function
-    const { data: result, error } = await supabase
+    const { data, error } = await supabase
       .rpc("topup_pass", {
         p_pass_id: passId,
         p_amount_cents: amountCents,
@@ -60,6 +56,8 @@ export async function POST(req: NextRequest) {
       console.error("Top-up RPC error:", error);
       return NextResponse.json({ error: "Top-up failed" }, { status: 500 });
     }
+
+    const result = data as { success: boolean; new_balance: number; error: string | null };
 
     if (!result.success) {
       console.error("Top-up failed:", result.error);
