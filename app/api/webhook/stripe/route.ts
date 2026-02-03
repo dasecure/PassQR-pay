@@ -14,7 +14,12 @@ export async function POST(req: NextRequest) {
   }
 
   let event: Stripe.Event;
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!webhookSecret) {
+    console.error("STRIPE_WEBHOOK_SECRET not configured");
+    return NextResponse.json({ error: "Webhook not configured" }, { status: 500 });
+  }
 
   try {
     event = getStripe().webhooks.constructEvent(body, signature, webhookSecret);
@@ -42,29 +47,41 @@ export async function POST(req: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Top up the pass using database function
-    const { data, error } = await supabase
-      .rpc("topup_pass", {
-        p_pass_id: passId,
-        p_amount_cents: amountCents,
-        p_stripe_payment_id: stripePaymentId,
-        p_description: `Top-up via Stripe`,
-      })
+    // Get current balance
+    const { data: pass, error: fetchError } = await supabase
+      .from("stored_value_passes")
+      .select("balance_cents")
+      .eq("id", passId)
       .single();
 
-    if (error) {
-      console.error("Top-up RPC error:", error);
-      return NextResponse.json({ error: "Top-up failed" }, { status: 500 });
+    if (fetchError || !pass) {
+      console.error("Pass not found:", passId);
+      return NextResponse.json({ error: "Pass not found" }, { status: 404 });
     }
 
-    const result = data as { success: boolean; new_balance: number; error: string | null };
+    // Update balance
+    const newBalance = pass.balance_cents + amountCents;
+    const { error: updateError } = await supabase
+      .from("stored_value_passes")
+      .update({ balance_cents: newBalance })
+      .eq("id", passId);
 
-    if (!result.success) {
-      console.error("Top-up failed:", result.error);
-      return NextResponse.json({ error: result.error }, { status: 400 });
+    if (updateError) {
+      console.error("Failed to update balance:", updateError);
+      return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
 
-    console.log(`[TOPUP] Pass ${passId} topped up by $${amountCents / 100}. New balance: $${result.new_balance / 100}`);
+    // Log the transaction
+    await supabase.from("transactions").insert({
+      pass_id: passId,
+      type: "topup",
+      amount_cents: amountCents,
+      balance_after_cents: newBalance,
+      stripe_payment_id: stripePaymentId,
+      description: "Top-up via Stripe",
+    }).catch(err => console.error("Transaction log failed:", err));
+
+    console.log(`[TOPUP] Pass ${passId} topped up by $${amountCents / 100}. New balance: $${newBalance / 100}`);
   }
 
   return NextResponse.json({ received: true });
