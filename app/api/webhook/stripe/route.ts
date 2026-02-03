@@ -71,15 +71,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
 
-    // Log the transaction
-    await supabase.from("transactions").insert({
+    // Log the transaction (fire and forget)
+    const { error: txError } = await supabase.from("transactions").insert({
       pass_id: passId,
       type: "topup",
       amount_cents: amountCents,
       balance_after_cents: newBalance,
       stripe_payment_id: stripePaymentId,
       description: "Top-up via Stripe",
-    }).catch(err => console.error("Transaction log failed:", err));
+    });
+    if (txError) console.error("Transaction log failed:", txError);
 
     console.log(`[TOPUP] Pass ${passId} topped up by $${amountCents / 100}. New balance: $${newBalance / 100}`);
   }
