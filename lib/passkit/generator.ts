@@ -93,6 +93,12 @@ function createPassJson(passData: PassData, config: PassConfig) {
       ] : [],
       backFields: [
         {
+          key: "topup",
+          label: "ADD FUNDS",
+          value: "Tap here to add money to your card",
+          attributedValue: `<a href="${process.env.NEXT_PUBLIC_BASE_URL || "https://pay.passqr.com"}/pass/${passData.passId}">Add Funds →</a>`,
+        },
+        {
           key: "terms",
           label: "Terms & Conditions",
           value: "This card is issued by PassQR. Balance is non-refundable. Present QR code to pay.",
