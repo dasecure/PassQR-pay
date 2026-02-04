@@ -4,7 +4,6 @@ import fs from "fs";
 import path from "path";
 import { PassData, PassConfig, DEFAULT_PASS_CONFIG } from "./types";
 
-const CERTS_DIR = path.join(process.cwd(), "certs");
 const PASS_TEMPLATE_DIR = path.join(process.cwd(), "pass-template");
 
 interface GeneratePassOptions {
@@ -150,21 +149,33 @@ function createManifest(tempDir: string): Record<string, string> {
 function signManifest(tempDir: string) {
   const manifestPath = path.join(tempDir, "manifest.json");
   const signaturePath = path.join(tempDir, "signature");
-  const p12Path = path.join(CERTS_DIR, "pass.p12");
-  const p12Password = process.env.PASS_P12_PASSWORD || "";
   
-  // Extract cert and key from p12
+  // Get certificate from env var (base64 encoded) or file
+  const p12Base64 = process.env.PASS_P12_BASE64;
+  const p12Path = path.join(tempDir, "pass.p12");
+  
+  if (p12Base64) {
+    // Decode from env var
+    fs.writeFileSync(p12Path, Buffer.from(p12Base64, "base64"));
+  } else {
+    // Fallback to file (local dev)
+    const localP12 = path.join(process.cwd(), "certs", "pass.p12");
+    if (!fs.existsSync(localP12)) {
+      throw new Error("PASS_P12_BASE64 env var not set and certs/pass.p12 not found");
+    }
+    fs.copyFileSync(localP12, p12Path);
+  }
+  
+  // Extract cert and key from p12 (empty password)
   const certPath = path.join(tempDir, "cert.pem");
   const keyPath = path.join(tempDir, "key.pem");
   
-  execSync(`openssl pkcs12 -in "${p12Path}" -clcerts -nokeys -out "${certPath}" -passin pass:${p12Password}`);
-  execSync(`openssl pkcs12 -in "${p12Path}" -nocerts -out "${keyPath}" -passin pass:${p12Password} -passout pass:temp`);
+  execSync(`openssl pkcs12 -in "${p12Path}" -clcerts -nokeys -out "${certPath}" -passin pass:`);
+  execSync(`openssl pkcs12 -in "${p12Path}" -nocerts -out "${keyPath}" -passin pass: -passout pass:temp`);
   
-  // Download Apple WWDR G4 certificate if not present
-  const wwdrPath = path.join(CERTS_DIR, "AppleWWDRCAG4.cer");
-  if (!fs.existsSync(wwdrPath)) {
-    execSync(`curl -s -o "${wwdrPath}" "https://www.apple.com/certificateauthority/AppleWWDRCAG4.cer"`);
-  }
+  // Download Apple WWDR G4 certificate
+  const wwdrPath = path.join(tempDir, "wwdr.cer");
+  execSync(`curl -s -o "${wwdrPath}" "https://www.apple.com/certificateauthority/AppleWWDRCAG4.cer"`);
   const wwdrPemPath = path.join(tempDir, "wwdr.pem");
   execSync(`openssl x509 -inform DER -in "${wwdrPath}" -out "${wwdrPemPath}"`);
   
@@ -175,8 +186,10 @@ function signManifest(tempDir: string) {
   );
   
   // Cleanup temp cert files
+  fs.unlinkSync(p12Path);
   fs.unlinkSync(certPath);
   fs.unlinkSync(keyPath);
+  fs.unlinkSync(wwdrPath);
   fs.unlinkSync(wwdrPemPath);
 }
 
